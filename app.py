@@ -1,10 +1,17 @@
 from dotenv import load_dotenv
 import os
 import streamlit as st
-from PyPDF2 import PdfReader
-from langchain.text_splitter import CharacterTextSplitter
-
+from pdf_processor import extract_text_from_pdf, process_text, format_docs
+from langchain.chains.question_answering import load_qa_chain
+from model import get_huggingface_llm
+from langchain_openai import ChatOpenAI
+from langchain import hub
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+from langchain_community.chat_models import ChatOllama
 def main():
+
+  llm = ChatOllama(model="mistral")
   load_dotenv()
   st.set_page_config(page_title="Ask your PDF")
   st.header("Ask your PDF")
@@ -14,25 +21,21 @@ def main():
 
 # extract the text
   if pdf is not None:
-    pdf_reader = PdfReader(pdf)
-    text = ""
-    for page in pdf_reader.pages:
-      text += page.extract_text()
+    text = extract_text_from_pdf(pdf_file=pdf)
+    retriever = process_text(text)
 
-    # split into chunks
+    prompt = hub.pull("rlm/rag-prompt")
+    rag_chain = ({"context": retriever | format_docs,
+                  "question": RunnablePassthrough()}
+                 | prompt
+                 | llm
+                 | StrOutputParser()
+                 )
 
-    # cấu hình
-    text_splitter = CharacterTextSplitter(
-        #   tách lấy từng câu
-        separator="\n",
-        # 1 lần lấy 1000 ký tự
-        chunk_size=1000,
-        # thụt lui sau 200 từ rồi lấy
-        chunk_overlap=200,
-        length_function=len,
-    )
-    chunks = text_splitter.split_text(text)
-    st.write(chunks)
+  user_question = st.text_input("Ask a question about your PDF")
+  if user_question:
+    output = rag_chain.invoke(user_question)
+    st.write(output)
 
 
 if __name__ == "__main__":
